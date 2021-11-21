@@ -1,13 +1,8 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.ComponentModel;
-using System.Data;
-using System.Drawing;
 using System.IO;
-using System.Linq;
 using System.Net;
 using System.Security.Cryptography;
-using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using Updater.cfg;
@@ -21,11 +16,9 @@ namespace Updater
         private readonly string OldData = "Data_old.dat";
         private WebClient Client;
         private bool downloadComplete = false;
-        private string file = null, md5 = null, dir = null;
-        private int Maxitems = 0;
-        private string[] strArray;
         private int conteo;
         private readonly Config cfg;
+        private Utils utils;
 
         public Updater()
         {
@@ -54,7 +47,9 @@ namespace Updater
             {
                 await Task.Run(() => CheckGameData(Data));
                 await Task.Run(() => DownloadFile(url + Data, Data));
+                utils = new Utils(Data);
                 await Task.Run(() => Gamedatas());
+                lb_name.Text = "Actualizado";
             }
             catch (Exception ex)
             {
@@ -93,200 +88,98 @@ namespace Updater
 
             }
         }
+        #region Invocacion segura
         private void SetLabel1TextSafe(string txt)
         {
-            lb_name.Invoke(new Action(() => lb_name.Text = txt));
+            if (lb_name.InvokeRequired)
+                lb_name.Invoke(new Action(() => lb_name.Text = txt));
+            else
+                lb_name.Text = txt;
         }
         private void SetProgressSafe(int p)
         {
-            pb_status.Invoke(new Action(() => pb_status.Value = p));
+            if (pb_status.InvokeRequired)
+                pb_status.Invoke(new Action(() => pb_status.Value = p));
+            else
+                pb_status.Value = p;
         }
-
+        private void SetLabelPercentTextSafe(int progressPercentage)
+        {
+            if (lb_name.InvokeRequired)
+                lb_percent.Invoke(new Action(() => lb_percent.Text = $"{progressPercentage}%"));
+            else
+                lb_percent.Text = $"{progressPercentage}%";
+        }
+        private void SetSafeButton(Button btn, bool v)
+        {
+            btn.Invoke(new Action(() => btn.Enabled = v));
+        }
+        #endregion
         private void EstadoDelProgreso(object sender, DownloadProgressChangedEventArgs e)
         {
             SetProgressSafe(e.ProgressPercentage);
             SetLabelPercentTextSafe(e.ProgressPercentage);
         }
-
-        private void SetLabelPercentTextSafe(int progressPercentage)
-        {
-            lb_percent.Invoke(new Action(() => lb_percent.Text = $"{progressPercentage}%"));
-        }
-
+        
         private void Completado(object sender, AsyncCompletedEventArgs e)
         {
             BeginInvoke((MethodInvoker)delegate { downloadComplete = true; });
         }
 
-        private async void Gamedatas()
+        private void Gamedatas()
         {
             try
             {
-                string Gdata1, Gdata2;
-                if (File.Exists(OldData))
-                {
-                    string lineas2;
-                    StreamReader _data = new StreamReader(Data);
-                    string[] _lineas2;
-                    while ((lineas2 = _data.ReadLine()) != null)
-                    {
-                        _lineas2 = lineas2.Split(char.Parse(":"));
-                        if (string.IsNullOrEmpty(_lineas2[0]))
-                        {
-                            break;
-                        }
-                        Maxitems++;
-                    }
-                    Gdata1 = await Task.Run(() => GetHashMD5(Data));
-                    Gdata2 = await Task.Run(() => GetHashMD5(OldData));
-
-                    if (string.Compare(Gdata1, Gdata2, StringComparison.OrdinalIgnoreCase) == 0)
-                    {
-                        StreamReader _file = new StreamReader(Data);
-                        string str;
-
-                        while ((str = _file.ReadLine()) != null)
-                        {
-                            strArray = str.Split(char.Parse(":"));
-                            file = strArray[0];
-                            md5 = strArray[1];
-                            var _urlC = url + file;
-
-                            if (string.IsNullOrEmpty(strArray[0]))
-                            {
-                                break;
-                            }
-                            if (file == "_Updater.exe")
-                            {
-                                string md5str = await Task.Run(() => GetHashMD5(file));
-                                if (!md5.Equals(md5str))
-                                {
-                                    if (File.Exists(file))
-                                    {
-                                        File.Move(file, file.Replace(".exe", ".temp"));
-                                        await Task.Run(() => DownloadFile(_urlC, file));
-                                    }
-                                    System.Diagnostics.Process.Start("_Updater.exe");
-                                    Application.Exit();
-                                    break;
-                                }
-                            }
-                            else
-                            {
-                                if (!File.Exists($"{cfg.MinecraftDirectory}\\mods\\{file}"))
-                                {
-                                    conteo++;
-                                    SetProgressSafe((conteo * 100) / Maxitems);
-
-                                    await Task.Run(() => DownloadFile(_urlC, $"{cfg.MinecraftDirectory}\\mods\\{file}"));
-
-                                }
-                                else
-                                {
-
-                                    await Task.Run(() => Comprobar());
-
-                                }
-                            }
-                        }
-
-                        SetLabel1TextSafe("Actualizado");
-                        SetSafeButton(btn_exit, true);
-
-
-                    }
-                }
-                else
-                {
-                    string lineas;
-                    StreamReader _file = new StreamReader(Data);
-                    while ((lineas = _file.ReadLine()) != null)
-                    {
-                        Maxitems++;
-                    }
-                    #region Crear Listado de Arrays y sus Comprobaciones
-                    DescargarArchivosGamedata();
-                    #endregion
-                }
+                    Check();
+                    SetLabel1TextSafe("Actualizado");
+                    SetSafeButton(btn_exit, true);
             }
             catch (Exception ex)
             {
                 MessageBox.Show(ex.Message);
+                SetLabel1TextSafe("Error");
+                SetSafeButton(btn_exit, true);
             }
         }
 
-        private void SetSafeButton(Button btn, bool v)
-        {
-            btn.Invoke(new Action(() => btn.Enabled = v));
-        }
-
-        private async void DescargarArchivosGamedata()
+        private async void Check()
         {
             try
             {
-                StreamReader _file = new StreamReader(Data);
-                string str;
-                string _urlC;
-                string nuevofile;
-
-                while ((str = _file.ReadLine()) != null)
+                foreach (var line in utils.Files)
                 {
-                    strArray = str.Split(char.Parse(":"));
-                    file = strArray[0];
-                    md5 = strArray[1];
-                    _urlC = url + file;
+                    string file, remotemd5, urld, md5local;
+                    file = line.Key;
+                    remotemd5 = line.Value;
+                    urld = url + file;
                     if (file == "_Updater.exe")
                     {
-                        string md5str = await Task.Run(() => GetHashMD5(file));
-                        if (!md5.Equals(md5str))
+                        md5local = GetHashMD5(file);
+
+                        if (!remotemd5.Equals(md5local))
                         {
                             if (File.Exists(file))
                             {
                                 File.Move(file, file.Replace(".exe", ".temp"));
-                                await Task.Run(() => DownloadFile(_urlC, file));
+                                await Task.Run(() => DownloadFile(urld, file));
                             }
                             System.Diagnostics.Process.Start("_Updater.exe");
                             Application.Exit();
-                        }
-                    }
-
-                    dir = Path.GetDirectoryName(file);
-                    if (!string.IsNullOrEmpty(dir))
-                    {
-                        if (!Directory.Exists(dir))
-                        {
-                            Directory.CreateDirectory(dir);
-                        }
-                        int index = dir.Length;
-                        nuevofile = file.Remove(0, index + 1);
-                    }
-
-                    if (!File.Exists(file))
-                    {
-                        conteo++;
-                        SetProgressSafe((conteo * 100) / Maxitems);
-                        if (!string.IsNullOrEmpty(dir))
-                        {
-                            if (Directory.Exists(dir))
-                            {
-                                await Task.Run(() => DownloadFile(url, $"{cfg.MinecraftDirectory}\\mods\\{file}"));
-                            }
-                        }
-                        else
-                        {
-                            await Task.Run(() => DownloadFile(url, $"{cfg.MinecraftDirectory}\\mods\\{file}"));
+                            break;
                         }
                     }
                     else
                     {
-
-                        await Task.Run(() => Comprobar());
-
+                        if (!File.Exists($"{cfg.MinecraftDirectory}\\mods\\{file}"))
+                        {
+                            await Task.Run(() => DownloadFile(url + file, $"{cfg.MinecraftDirectory}\\mods\\{file}"));
+                        }
+                        else
+                        {
+                            Comprobar(file, remotemd5);
+                        }
                     }
                 }
-
-                SetLabel1TextSafe("Actualizado");
-                SetSafeButton(btn_exit, true);
             }
             catch (Exception ex)
             {
@@ -299,31 +192,19 @@ namespace Updater
             Environment.Exit(0);
         }
 
-        private async void Comprobar()
+        private async void Comprobar(string file, string remotemd5)
         {
             conteo++;
-            SetProgressSafe((conteo * 100) / Maxitems);
+            SetProgressSafe((conteo * 100) / utils.Length);
             SetLabel1TextSafe("Comprobando: " + file);
-            //
-            string md5str;
+            string localmd5;
             if (file == "_Updater.exe")
-                md5str = await Task.Run(() => GetHashMD5(file));
+                localmd5 = GetHashMD5(file);
             else
-                md5str = await Task.Run(() => GetHashMD5($"{cfg.MinecraftDirectory}\\mods\\{file}"));
-            //
-            if (!md5.Equals(md5str))
+                localmd5 = await Task.Run(() => GetHashMD5($"{cfg.MinecraftDirectory}\\mods\\{file}"));
+            if (!remotemd5.Equals(localmd5))
             {
-                if (!string.IsNullOrEmpty(dir))
-                {
-                    if (Directory.Exists(dir))
-                    {
-                        await Task.Run(() => DownloadFile(url, $"{cfg.MinecraftDirectory}\\mods\\{file}"));
-                    }
-                }
-                else
-                {
-                    await Task.Run(() => DownloadFile(url, $"{cfg.MinecraftDirectory}\\mods\\{file}"));
-                }
+                await Task.Run(() => DownloadFile(url + file, $"{cfg.MinecraftDirectory}\\mods\\{file}"));
             }
         }
 

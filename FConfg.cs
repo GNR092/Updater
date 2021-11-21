@@ -27,7 +27,7 @@ namespace Updater
                 fb.SelectedPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData) + "\\.minecraft";
                 if (fb.ShowDialog() != DialogResult.OK) return;
                 cnf.MinecraftDirectory = fb.SelectedPath;
-                Config.Write("Config.dat", cnf);
+                txt_directory.Text = fb.SelectedPath;
             }
         }
 
